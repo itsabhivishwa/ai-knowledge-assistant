@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+chromadb
+sentence-transformers
+pypdf
+docx2txt
+pandas
+python-docx
+openpyxl
+python-dotenv
+requests

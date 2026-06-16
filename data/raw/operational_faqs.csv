@@ -1,0 +1,4 @@
+Question,Answer
+What is the daily cutoff time for logging progress updates in Jira?,All Jira tickets must be updated completely by 3:20 PM IST daily before office closure.
+How do I request help if my ticket is facing an unexpected blocker?,Tag team members in your Jira ticket comments and post the specific block alerts onto your specific Microsoft Teams channel.
+Where should testing team metrics and FOU certificates be stored?,"All completed software test cases, validation logs, and Fitness of Use (FOU) certifications are kept permanently inside DevOps archives."

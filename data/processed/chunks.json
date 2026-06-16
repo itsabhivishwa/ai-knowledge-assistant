@@ -1,0 +1,77 @@
+[
+    {
+        "id": "chk_engineering_overview_000",
+        "text": "# FloCard Engineering Core Overview Welcome to the FloCard Engineering ecosystem. This document serves as the primary technical onboarding guide for incoming developers. ## Our Mission Our core objective is to redefine digital identity management and contact synchronization pipelines. We build scalable, highly secure systems that allow seamless P2P profile exchanges. ## Sprint Operations - Sprints operate on strict 15-day development cycles. - Daily standups are hosted on Microsoft Teams channels promptly at 9:30 AM IST. - Jira tickets must be accurately categorized (Epic, Story, Bug, Task).",
+        "metadata": {
+            "title": "FloCard Engineering Overview",
+            "tags": [
+                "onboarding",
+                "engineering",
+                "sprints"
+            ],
+            "type": "Markdown",
+            "date": "2026-06-09"
+        },
+        "source": "data\\raw\\engineering_overview.md"
+    },
+    {
+        "id": "chk_engineering_overview_001",
+        "text": "s must be accurately categorized (Epic, Story, Bug, Task).",
+        "metadata": {
+            "title": "FloCard Engineering Overview",
+            "tags": [
+                "onboarding",
+                "engineering",
+                "sprints"
+            ],
+            "type": "Markdown",
+            "date": "2026-06-09"
+        },
+        "source": "data\\raw\\engineering_overview.md"
+    },
+    {
+        "id": "chk_git_workflow_sop_000",
+        "text": "SOP: Code Review and Git Workflow 1. Branching Strategy All engineering work must originate from isolated short-lived branches. Use the convention feature/your-feature-name. Do not push direct commits onto the dev or main branch pathways. 2. Pull Request Guidelines Before requesting a merge from feature/* into dev, ensure that all unit tests execute and pass successfully locally. A minimum of two peer code reviews is required to clear the quality gate before ultimate branch merging.",
+        "metadata": {
+            "title": "Git Workflow SOP",
+            "tags": [
+                "git",
+                "sop",
+                "code-review"
+            ],
+            "type": "DOCX",
+            "date": "2026-06-09"
+        },
+        "source": "data\\raw\\git_workflow_sop.docx"
+    },
+    {
+        "id": "chk_operational_faqs_000",
+        "text": "Question: What is the daily cutoff time for logging progress updates in Jira? | Answer: All Jira tickets must be updated completely by 3:20 PM IST daily before office closure. Question: How do I request help if my ticket is facing an unexpected blocker? | Answer: Tag team members in your Jira ticket comments and post the specific block alerts onto your specific Microsoft Teams channel. Question: Where should testing team metrics and FOU certificates be stored? | Answer: All completed software test cases, validation logs, and Fitness of Use (FOU) certifications are kept permanently inside DevOp",
+        "metadata": {
+            "title": "Operational FAQs Log",
+            "tags": [
+                "jira",
+                "faq",
+                "operations"
+            ],
+            "type": "CSV",
+            "date": "2026-06-09"
+        },
+        "source": "data\\raw\\operational_faqs.csv"
+    },
+    {
+        "id": "chk_operational_faqs_001",
+        "text": "f Use (FOU) certifications are kept permanently inside DevOps archives.",
+        "metadata": {
+            "title": "Operational FAQs Log",
+            "tags": [
+                "jira",
+                "faq",
+                "operations"
+            ],
+            "type": "CSV",
+            "date": "2026-06-09"
+        },
+        "source": "data\\raw\\operational_faqs.csv"
+    }
+]
