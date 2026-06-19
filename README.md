@@ -54,8 +54,14 @@ LINKEDIN_CLIENT_ID=your_linkedin_developer_client_id
 LINKEDIN_CLIENT_SECRET=your_linkedin_app_client_secret
 
 # System Permissions
-NEXT_PUBLIC_ADMIN_EMAILS=your_verified_admin_email@gmail.com
+# Bootstrap-only super admin list. These users can add/remove admins from the app UI.
+SUPER_ADMIN_EMAILS=hr.lead@company.com,it.owner@company.com
+
+# Legacy fallback still works during migration, but prefer SUPER_ADMIN_EMAILS.
+ADMIN_EMAILS=it.owner@company.com
 \`\`\`
+
+After the first super admin signs in, open the upload authorization panel and use **Admin management** to add HR or operations users. Those changes are stored server-side in `ui-next/data/admin-access.json`, so future admin changes do not require code edits.
 
 ---
 

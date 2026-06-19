@@ -1,17 +1,16 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "../auth/[...nextauth]/route";
+import { getAdminRole } from "@/lib/adminAccess";
 
-const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-  .split(",")
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   const email = session?.user?.email?.toLowerCase();
+  const role = await getAdminRole(email);
 
-  if (!email || !adminEmails.includes(email)) {
+  if (!email || !role) {
     return NextResponse.json(
       { status: "error", message: "Admin authorization required for document upload." },
       { status: 403 }
