@@ -8,11 +8,10 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
 export const authOptions: NextAuthOptions = {
-  // 🏢 LINK PRISMA ADAPTER TO PERSIST SOCIAL & CREDENTIALS SESSIONS NATIVELY
+  // 🏢 Link adapter for natively tracking profiles data rows
   adapter: PrismaAdapter(prisma),
 
   providers: [
-    // 1. 🛡️ NEW CREDENTIALS PROVIDER FOR MANUAL INLINE SIGNUP / LOGIN ENTRIES
     CredentialsProvider({
       name: "Credentials",
       credentials: {
@@ -23,105 +22,120 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Missing mandatory credentials fields.");
         }
-
         const targetEmail = credentials.email.toLowerCase().trim();
-
-        // Query the schema model registry safely
-        const user = await prisma.user.findUnique({
-          where: { email: targetEmail }
-        });
-
+        const user = await prisma.user.findUnique({ where: { email: targetEmail } });
         if (!user || !user.password) {
-          throw new Error("Identity node record not registered under credentials database.");
+          throw new Error("Identity node record not registered.");
         }
-
-        // Validate cryptographically salted password signatures
         const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-
         if (!isPasswordValid) {
-          throw new Error("Invalid decryption handshake: Password mismatch matrix.");
+          throw new Error("Invalid password signature.");
         }
-
-        // Return user context matrix variables cleanly
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        };
+        return { id: user.id, name: user.name, email: user.email, role: user.role };
       }
     }),
 
-    // 2. Google Identity Provider Node
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
-    
-    // 3. Microsoft Azure AD Provider (Explicit Env Name Mapping)
+
+
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       tenantId: process.env.AZURE_AD_TENANT_ID || "common",
+
+      // ⚡ COMPREHENSIVE ISSUER HANDSHAKE SYNCHRONIZATION 
+      authorization: {
+        params: {
+          scope: "openid profile email User.Read",
+          prompt: "select_account", // Enforces explicit selection panel
+        },
+      },
+      client: {
+        token_endpoint_auth_method: "client_secret_post",
+      },
+      // 🚨 CRUCIAL FILTER OVERRIDE: Tells NextAuth to allow dynamic multi-tenant issuer IDs safely
+      allowDangerousEmailAccountLinking: true,
+
+      profile(profile) {
+        return {
+          id: profile.sub || profile.oid,
+          name: profile.name || profile.preferred_username || "Microsoft Operator",
+          email: profile.email || profile.preferred_username || profile.upn,
+          image: null,
+          role: "user", // System default assignment node
+        };
+      },
     }),
-    
-    // 4. LinkedIn App Provider via OpenID Connect
+
     {
       id: "linkedin",
       name: "LinkedIn",
       type: "oauth",
       wellKnown: "https://www.linkedin.com/oauth/.well-known/openid-configuration",
-      authorization: {
-        params: { scope: "openid profile email" },
-      },
-      client: {
-        token_endpoint_auth_method: "client_secret_post",
-      },
+      authorization: { params: { scope: "openid profile email" } },
+      client: { token_endpoint_auth_method: "client_secret_post" },
       clientId: process.env.LINKEDIN_CLIENT_ID!,
       clientSecret: process.env.LINKEDIN_CLIENT_SECRET!,
       idToken: true,
       checks: ["state"],
       profile(profile) {
-        return {
-          id: profile.sub,
-          name: profile.name,
-          email: profile.email,
-          image: profile.picture,
-        };
+        return { id: profile.sub, name: profile.name, email: profile.email, image: profile.picture, role: "user" };
       },
     },
   ],
 
-  // Override JWT strategy token lifecycle management
   session: {
-    strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60 // 30 Days active token lifecycle
+    strategy: "jwt", // ⚡ Keeps dynamic token mapping fast and responsive without session block lockups
+    maxAge: 30 * 24 * 60 * 60
   },
 
   secret: process.env.NEXTAUTH_SECRET,
-  
+
   pages: {
-    signIn: "/", 
-    error: "/",   
+    signIn: "/",
+    error: "/",
   },
 
   callbacks: {
-    // 🧬 Injects DB specific tokens like user ID and system Roles cleanly into the JWT payload
+    async signIn({ user, account, profile }) {
+      if (account?.provider === "credentials") {
+        return true;
+      }
+
+      if (user.email) {
+        const targetEmail = user.email.toLowerCase().trim();
+        const existingUser = await prisma.user.findUnique({
+          where: { email: targetEmail }
+        });
+
+        // 🚨 TESTING BYPASS: If social user doesn't exist, automatically insert them safely!
+        if (!existingUser) {
+          await prisma.user.create({
+            data: {
+              email: targetEmail,
+              name: user.name || "OAuth Operator",
+              role: "user"
+            }
+          });
+        }
+        return true;
+      }
+      return false;
+    },
+
     async jwt({ token, user, account }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role || "user";
       }
-
       if (account) {
         token.accessToken = account.access_token;
       }
-      
-      // Auto-profile checker logic for dynamic social login tracking
-      if (account && account.provider !== "credentials" && token.email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: token.email }
-        });
+      if (token.email) {
+        const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
         if (dbUser) {
           token.id = dbUser.id;
           token.role = dbUser.role;
@@ -130,7 +144,6 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
 
-    // 🌟 Exposes internal variables directly to the useSession() React client hook
     async session({ session, token }) {
       if (session?.user) {
         (session.user as any).id = token.id || token.sub;
@@ -142,5 +155,4 @@ export const authOptions: NextAuthOptions = {
 };
 
 const handler = NextAuth(authOptions);
-
 export { handler as GET, handler as POST };

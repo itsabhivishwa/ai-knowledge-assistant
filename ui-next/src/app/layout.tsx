@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FloCard AI Core", // Name change kar diya premium feel ke liye
+  title: "Nexora System", // Name change kar diya premium feel ke liye
   description: "Secure Enterprise Knowledge Base Engine",
 };
 

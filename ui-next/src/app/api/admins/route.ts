@@ -2,8 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "../auth/[...nextauth]/route";
 import { getAdminRole, listAdminRecords, removeAdmin, upsertAdmin, type AdminRecord } from "@/lib/adminAccess";
-import { promises as fs } from "fs";
-import path from "path";
+import { prisma } from "@/lib/prisma"; // ⚡ INJECTED PRISMA CONNECTION FOR GLOBAL ACCURACY LIVE TRACKING
 
 export const runtime = "nodejs";
 
@@ -17,28 +16,36 @@ async function requireCurrentUser() {
   return { email, role };
 }
 
+// 🤖 LIVE DATABASE TELEMETRY AGGREGATION CORE
 async function getFeedbackStats() {
-  const feedbackLogPath = path.join(process.cwd(), "data", "feedback-log.json");
   try {
-    const raw = await fs.readFile(feedbackLogPath, "utf8");
-    const allFeedback = JSON.parse(raw);
-    if (!Array.isArray(allFeedback)) return { good: 0, bad: 0, total: 0, recent: [] };
+    // Direct database registry node hits safely
+    const allFeedbacks = await prisma.botFeedback.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        message: true // Pulls prompt matrix safely via dynamic schemas mapping
+      }
+    });
 
-    let good = 0;
-    let bad = 0;
-    for (const entry of allFeedback) {
-      if (entry.feedback === "good") good++;
-      else if (entry.feedback === "bad") bad++;
-    }
-    
-    // Get the last 5 feedback entries
-    const recent = allFeedback.slice(-5).reverse();
-    return { good, bad, total: allFeedback.length, recent };
-  } catch (error: any) {
-    if (error.code === "ENOENT") {
-      return { good: 0, bad: 0, total: 0, recent: [] };
-    }
-    return { good: 0, bad: 0, total: 0, recent: [], error: "Failed to read feedback log." };
+    const goodCount = allFeedbacks.filter(f => f.vote === "GOOD").length;
+    const badCount = allFeedbacks.filter(f => f.vote === "BAD").length;
+
+    // Format top 5 structural recent records directly matching front-end layouts
+    const recentLogs = allFeedbacks.slice(0, 5).map(f => ({
+      feedback: f.vote.toLowerCase(), // Converts strict DB "GOOD" back to frontend format
+      content: f.message?.prompt || "Structured company framework log query node",
+      timestamp: f.createdAt.toISOString()
+    }));
+
+    return { 
+      good: goodCount, 
+      bad: badCount, 
+      total: allFeedbacks.length, 
+      recent: recentLogs 
+    };
+  } catch (error) {
+    console.error("Telemetry Registry Matrix Read Exception:", error);
+    return { good: 0, bad: 0, total: 0, recent: [] };
   }
 }
 
@@ -55,7 +62,7 @@ export async function GET() {
     status: "ok",
     currentUserRole: role || "user",
     isAdmin: isAdmin,
-    feedbackStats: await getFeedbackStats(),
+    feedbackStats: await getFeedbackStats(), // ⚡ Now dynamically fetches global realtime database counts
     admins: isAdmin ? await listAdminRecords() : [],
   });
 }

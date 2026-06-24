@@ -35,15 +35,16 @@ model Session {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String        @id @default(cuid())
   name          String?
-  email         String?   @unique
+  email         String?       @unique
   emailVerified DateTime?
   image         String?
   password      String?
-  role          String    @default("user")
+  role          String        @default("user")
   accounts      Account[]
   sessions      Session[]
+  messages      ChatMessage[] // Relation to trace user messages
 }
 
 model VerificationToken {
@@ -52,4 +53,29 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// ==========================================
+// 🤖 NEW: BOT PERFORMANCE & CHAT TRACKING DATA NODES
+// ==========================================
+
+model ChatMessage {
+  id        String       @id @default(cuid())
+  userId    String?      // Optional if guest sessions are allowed
+  prompt    String       // User input query
+  response  String       // Gemini generated answer
+  createdAt DateTime     @default(now())
+  
+  user      User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedback  BotFeedback? // Relation map to track accuracy telemetry
+}
+
+model BotFeedback {
+  id        String      @id @default(cuid())
+  messageId String      @unique // One feedback per message string node
+  vote      String      // Will explicitly store "GOOD" or "BAD"
+  reason    String?     // Optional feedback text description if user writes why
+  createdAt DateTime    @default(now())
+
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }

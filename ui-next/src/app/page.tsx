@@ -25,6 +25,15 @@ interface AdminEntry {
   addedBy: string;
 }
 
+// 🏢 PREMIUM SYSTEM ERROR TRANSLATION MATRIX
+const enterpriseErrorRegistry: Record<string, string> = {
+  AccountNotRegistered: "This organizational account is not registered. Please create a local profile using your credentials before syncing identity nodes.",
+  AccessDenied: "Access denied: Your token authorization profile does not hold clearance for this workspace core.",
+  CredentialsSignin: "Invalid authorization handshake: Security password signature mismatch.",
+  OAuthSignin: "OAuth Handshake Rejection: Access Token Secret mismatch or Invalid Redirect URI setup on Developer Console.",
+  Default: "An active intercept boundary handshake error occurred. Please try again or contact IT operations management."
+};
+
 export default function Home() {
   // 🔥 NEXTAUTH LIVE ENGINE SESSIONS HOOKS
   const { data: session, status } = useSession();
@@ -47,6 +56,10 @@ export default function Home() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [showDashboard, setShowDashboard] = useState(false); 
   const [showAdminUploadGate, setShowAdminUploadGate] = useState(false);
+  
+  // ⚡ SEPARATED MANAGEMENT CONTROLLER STATE
+  const [showAdminManagementGate, setShowAdminManagementGate] = useState(false);
+
   const [authPanelMode, setAuthPanelMode] = useState<"login" | "signup" | null>(null);
   const [adminAccess, setAdminAccess] = useState<{
     currentUserRole: "user" | "admin";
@@ -68,6 +81,9 @@ export default function Home() {
   const [nameInput, setNameInput] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
+  
+  // ⚡ PASSWORD VISIBILITY CONTROLLER
+  const [showPassword, setShowPassword] = useState(false);
 
   // DROP-UP EXPORT MENU STATE
   const [activeExportMenuId, setActiveExportMenuId] = useState<string | null>(null);
@@ -122,12 +138,8 @@ export default function Home() {
       const params = new URLSearchParams(window.location.search);
       const errorParam = params.get("error");
       if (errorParam) {
-        setAuthError(
-          errorParam === "OAuthSignin" 
-            ? "OAuth Handshake Rejection: Access Token Secret mismatch or Invalid Redirect URI setup on Developer Console." 
-            : errorParam
-        );
-        setAuthPanelMode("login"); // Open auth module directly if handshake breaks
+        setAuthError(enterpriseErrorRegistry[errorParam] || errorParam);
+        setAuthPanelMode("login"); 
       }
     }
   }, []);
@@ -169,6 +181,11 @@ export default function Home() {
 
     loadAdminAccess();
   }, [session]);
+
+  // Reset eye icon visibility state whenever screen swaps tabs
+  useEffect(() => {
+    setShowPassword(false);
+  }, [authPanelMode]);
 
   // 🔥 GLOBAL CLICK WRAPPER: CLOSES OVERLAYS AND DYNAMIC CURVED TELEMETRY ON OUTSIDE CLICK
   useEffect(() => {
@@ -227,15 +244,11 @@ export default function Home() {
   };
 
   const handleUploadAccessRequest = () => {
-    setShowAdminUploadGate(true);
-  };
-
-  const handleAdminUploadConfirm = () => {
-    if (!userIsAdmin || uploading) return;
-    setShowAdminUploadGate(false);
-    setTimeout(() => {
+    if (userIsAdmin) {
       fileInputRef.current?.click();
-    }, 100);
+    } else {
+      setShowAdminUploadGate(true);
+    }
   };
 
   const refreshAdminAccess = async () => {
@@ -289,29 +302,37 @@ export default function Home() {
     }
   };
 
+  // 🔥 STATE HANDLING: Dynamic Inline Overwrite Sequence to bypass React batch latency
   const triggerStreamQuery = async (queryText: string, sessionId: string, targetMessageId?: string) => {
     setLoading(true);
     abortControllerRef.current = new AbortController();
 
-    const targetSession = sessions.find(s => s.id === sessionId) || sessions[0];
-    let updatedMessages = targetSession ? [...targetSession.messages] : [];
-    
-    if (targetMessageId) {
-      const idx = updatedMessages.findIndex(m => m.id === targetMessageId);
-      if (idx !== -1) updatedMessages = updatedMessages.slice(0, idx + 1);
-    } else {
-      updatedMessages.push({ id: `u-${Date.now()}`, role: "user", content: queryText });
-    }
-
-    const assistantMessageId = `a-${Date.now()}`;
-    updatedMessages.push({ id: assistantMessageId, role: "assistant", content: "", citations: [], feedback: null });
+    let updatedSessionsSnapshot = [];
     
     setSessions(prev => {
+      const targetSession = prev.find(s => s.id === sessionId) || prev[0];
+      let updatedMessages = targetSession ? [...targetSession.messages] : [];
+      
+      if (targetMessageId) {
+        const idx = updatedMessages.findIndex(m => m.id === targetMessageId);
+        if (idx !== -1) {
+          updatedMessages = updatedMessages.slice(0, idx);
+          updatedMessages.push({ id: targetMessageId, role: "user", content: queryText.trim() });
+        }
+      } else {
+        updatedMessages.push({ id: `u-${Date.now()}`, role: "user", content: queryText });
+      }
+
+      const assistantMessageId = `a-${Date.now()}`;
+      updatedMessages.push({ id: assistantMessageId, role: "assistant", content: "", citations: [], feedback: null });
+      
       const result = prev.map(s => s.id === sessionId ? {
         ...s,
         title: s.messages.length === 0 ? (queryText.substring(0, 24)) : s.title,
         messages: updatedMessages
       } : s);
+      
+      updatedSessionsSnapshot = result as any;
       updateLocalStorage(result);
       return result;
     });
@@ -329,6 +350,7 @@ export default function Home() {
       const decoder = new TextDecoder();
       let accumulatedAnswer = "";
       let parsedCitations: any[] = [];
+      let realDatabaseMessageId: string | null = null;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -341,23 +363,40 @@ export default function Home() {
             try {
               const rawData = JSON.parse(line.substring(6));
               if (rawData.citations) parsedCitations = rawData.citations;
+              
+              if (rawData.message_id || rawData.messageId) {
+                realDatabaseMessageId = rawData.message_id || rawData.messageId;
+              }
+
               if (rawData.token) {
                 accumulatedAnswer += rawData.token;
                 setSessions(prev => {
-                  const updated = prev.map(s => s.id === sessionId ? {
+                  return prev.map(s => s.id === sessionId ? {
                     ...s,
-                    messages: s.messages.map(m => m.id === assistantMessageId ? {
-                      ...m, content: accumulatedAnswer, citations: parsedCitations
-                    } : m)
+                    messages: s.messages.map(m => {
+                      if (m.role === "assistant" && (realDatabaseMessageId ? (m.id === realDatabaseMessageId || m.id.startsWith('a-')) : m.id.startsWith('a-'))) {
+                        return {
+                          ...m,
+                          id: realDatabaseMessageId || m.id,
+                          content: accumulatedAnswer,
+                          citations: parsedCitations
+                        };
+                      }
+                      return m;
+                    })
                   } : s);
-                  updateLocalStorage(updated);
-                  return updated;
                 });
               }
             } catch (e) {}
           }
         }
       }
+      
+      setSessions(prev => {
+        updateLocalStorage(prev);
+        return prev;
+      });
+
     } catch (err: any) {
       if (err.name !== "AbortError") console.error(err);
     } finally {
@@ -415,12 +454,16 @@ export default function Home() {
     updateLocalStorage(updatedSessions);
   };
 
-  const handleFeedback = (msgId: string, type: "good" | "bad") => {
-    const message = currentSession.messages.find(m => m.id === msgId);
+  const handleFeedback = async (msgId: string, type: "good" | "bad") => {
+    const messageIndex = currentSession.messages.findIndex(m => m.id === msgId);
+    const message = currentSession.messages[messageIndex];
     if (!message) return;
     const newFeedback = message.feedback === type ? null : type;
+    const promptMessage = currentSession.messages
+      .slice(0, messageIndex)
+      .reverse()
+      .find(m => m.role === "user");
 
-    // Optimistic UI update
     setSessions(prev => {
       const updated = prev.map(s => s.id === activeSessionId ? {
         ...s,
@@ -430,12 +473,24 @@ export default function Home() {
       return updated;
     });
 
-    // Send feedback to the backend
-    fetch("/api/feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: activeSessionId, messageId: msgId, feedback: newFeedback, content: message.content }),
-    }).catch(err => console.error("Failed to log feedback:", err));
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          messageId: msgId, 
+          feedback: newFeedback, 
+          prompt: promptMessage?.content || "",
+          content: message.content 
+        }),
+      });
+
+      if (response.ok) {
+        await refreshAdminAccess();
+      }
+    } catch (err) {
+      console.error("Failed to log persistent feedback matrix:", err);
+    }
   };
 
   const handleReload = (msgId: string) => {
@@ -493,7 +548,6 @@ export default function Home() {
     signIn(provider, { callbackUrl });
   };
 
-  // 🔥 FIXED INLINE GEMINI-STYLE EDIT-SUBMIT RELOAD LOGIC (NO SEPARATE REWRITE BUTTON)
   const handleInlineEditSubmit = (msgId: string, originalContent: string) => {
     if (!editInput.trim() || loading) return;
     
@@ -502,40 +556,12 @@ export default function Home() {
       return;
     }
 
-    setSessions(prev => {
-      const targetSession = prev.find(s => s.id === activeSessionId);
-      if (!targetSession) return prev;
-
-      const idx = targetSession.messages.findIndex(m => m.id === msgId);
-      if (idx === -1) return prev;
-
-      const rolledBackMessages = targetSession.messages.slice(0, idx);
-      rolledBackMessages.push({ id: msgId, role: "user", content: editInput.trim() });
-
-      const updated = prev.map(s => s.id === activeSessionId ? { ...s, messages: rolledBackMessages } : s);
-      updateLocalStorage(updated);
-      return updated;
-    });
-
     const targetQuery = editInput.trim();
     setIsEditing(null);
     
-    setTimeout(() => {
-      triggerStreamQuery(targetQuery, activeSessionId, msgId);
-    }, 80);
+    triggerStreamQuery(targetQuery, activeSessionId, msgId);
   };
 
-  const handleRewriteSubmit = (msgId: string) => {
-    if (!editInput.trim() || loading) return;
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? {
-      ...s,
-      messages: s.messages.map(m => m.id === msgId ? { ...m, content: editInput } : m)
-    } : s));
-    setIsEditing(null);
-    triggerStreamQuery(editInput, activeSessionId, msgId);
-  };
-
-  // 🔥 REFACTORED INTERFACE CUSTOM FORMS LOGIN / SIGNUP FORM DISPATCH LOGIC
   const handleCustomAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -550,7 +576,6 @@ export default function Home() {
 
     try {
       if (authPanelMode === "signup") {
-        // Trigger manual cloud pipeline signup API route
         const res = await fetch("/api/auth/signup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -566,7 +591,6 @@ export default function Home() {
 
         setAuthSuccessMessage("Workspace created successfully! Shifting to login view...");
         setNameInput("");
-        // Auto transfer screen viewport mode cleanly to login after registration success
         setTimeout(() => {
           setAuthPanelMode("login");
           setAuthSuccessMessage(null);
@@ -574,7 +598,6 @@ export default function Home() {
         }, 1500);
 
       } else {
-        // Trigger direct credentials verification check via NextAuth framework core
         const res = await signIn("credentials", {
           email: emailInput.trim(),
           password: passwordInput,
@@ -582,10 +605,9 @@ export default function Home() {
         });
 
         if (res?.error) {
-          throw new Error(res.error === "CredentialsSignin" ? "Invalid login details. Identity mismatch." : res.error);
+          throw new Error(enterpriseErrorRegistry[res.error] || "Invalid verification signature.");
         }
         
-        // Wipe local auth caching buffers
         setEmailInput("");
         setPasswordInput("");
         setAuthLoading(false);
@@ -596,15 +618,13 @@ export default function Home() {
     }
   };
 
-  // 🌐 CASE 1: USER IS NOT AUTHENTICATED -> RENDER PREMIUM NEXORA LANDING PAGE Or GATEWAY MODAL
+  // 🌐 CASE 1: USER IS NOT AUTHENTICATED
   if (!userIsAuthenticated) {
     return (
       <main className="min-h-screen bg-[#080b12] font-sans antialiased text-slate-100 flex flex-col relative overflow-hidden">
-        {/* Neon Background Canvas Orbs */}
         <div className="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[140px] pointer-events-none" />
         <div className="absolute bottom-[-10%] left-[-5%] w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[140px] pointer-events-none" />
 
-        {/* Global Floating Header Block */}
         <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/5 bg-[#080b12]/80 backdrop-blur-lg">
           <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
             <button onClick={() => { setAuthPanelMode(null); setAuthError(null); setAuthSuccessMessage(null); }} className="flex items-center gap-3 text-left focus:outline-none">
@@ -628,7 +648,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Hero Showcase Display Area */}
         <section className="relative min-h-screen flex items-center pt-16">
           <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-12 px-6 py-12 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="max-w-2xl space-y-6 text-left">
@@ -662,23 +681,23 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Dynamic Card/Auth Enclosure Toggle Switch Side */}
             <div className="relative w-full flex justify-center lg:justify-end">
               {authPanelMode ? (
-                // Activated Auth Identity Node Enclosure Panel
                 <div className="w-full max-w-md rounded-[24px] border border-slate-800/80 bg-slate-950/60 p-6 shadow-2xl backdrop-blur-xl space-y-4 relative z-10 animate-fadeIn">
                   <div className="flex items-start justify-between gap-4 border-b border-slate-900 pb-3">
                     <div>
-                      <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400">{authPanelMode === "login" ? "Welcome back Node" : "Registration Cluster"}</p>
-                      <h2 className="mt-1 text-lg font-bold text-white">{authPanelMode === "login" ? "Identity Login" : "Initialize Workspace Account"}</h2>
+                      <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400">{authPanelMode === "login" ? "LOGIN" : "Signup"}</p>
+                      <h2 className="mt-1 text-lg font-bold text-white">{authPanelMode === "login" ? "Already a User...?" : "New User"}</h2>
                     </div>
                     <button onClick={() => { setAuthPanelMode(null); setAuthError(null); setAuthSuccessMessage(null); }} className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-white transition">X</button>
                   </div>
 
                   {authError && (
-                    <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
-                      <p className="font-bold text-red-400">Handshake Intercept boundary</p>
-                      <p className="mt-0.5 font-mono text-[11px] leading-normal text-red-300/80">{authError}</p>
+                    <div className="rounded-xl border border-red-500/30 bg-red-950/40 p-4 text-xs tracking-wide">
+                      <div className="font-bold text-red-400 uppercase tracking-wider text-[10px] mb-1">
+                        Security Intercept Warning
+                      </div>
+                      <p className="leading-relaxed font-medium text-red-200/90">{authError}</p>
                     </div>
                   )}
 
@@ -688,22 +707,21 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* 🔥 REFACTORED: CONDITIONAL CREDENTIALS FORM RENDER INJECTOR GRID */}
                   <form onSubmit={handleCustomAuthSubmit} className="space-y-3">
                     {authPanelMode === "signup" && (
                       <div className="space-y-1">
-                        <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Full Operator Name</label>
+                        <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Full Name</label>
                         <input 
                           type="text" 
                           value={nameInput}
                           onChange={(e) => setNameInput(e.target.value)}
-                          placeholder="Abhishek Vishwakarma"
+                          placeholder="Enter Your Name"
                           className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-600"
                         />
                       </div>
                     )}
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Corporate Email Address</label>
+                      <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Email Address</label>
                       <input 
                         type="email" 
                         value={emailInput}
@@ -713,16 +731,35 @@ export default function Home() {
                         className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-600"
                       />
                     </div>
+                    
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Security Token Password</label>
-                      <input 
-                        type="password" 
-                        value={passwordInput}
-                        onChange={(e) => setPasswordInput(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                        className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-600"
-                      />
+                      <label className="text-[10px] font-mono text-slate-400 font-semibold uppercase tracking-wider pl-1">Password</label>
+                      <div className="relative flex items-center">
+                        <input 
+                          type={showPassword ? "text" : "password"} 
+                          value={passwordInput}
+                          onChange={(e) => setPasswordInput(e.target.value)}
+                          placeholder="••••••••"
+                          required
+                          className="w-full bg-slate-900/80 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 text-slate-500 hover:text-slate-300 transition-colors focus:outline-none"
+                        >
+                          {showPassword ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-4 h-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 1-4.243-4.243m4.242 4.242L9.88 9.88" />
+                            </svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-4 h-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <button 
@@ -734,7 +771,6 @@ export default function Home() {
                     </button>
                   </form>
 
-                  {/* Separator Boundary Node */}
                   <div className="relative flex py-1 items-center">
                     <div className="flex-grow border-t border-slate-900"></div>
                     <span className="flex-shrink mx-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest">Or Trace Identity Via</span>
@@ -750,7 +786,7 @@ export default function Home() {
                           <path fill="#FBBC05" d="M5.25 14.44c-.24-.72-.38-1.5-.38-2.31s.14-1.59.38-2.31v-3.8H1.39C.5 7.74 0 9.81 0 12s.5 4.26 1.39 6.13l3.86-3.69z" />
                           <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.91l-3.62-2.81c-1.01.68-2.3 1.09-3.96 1.09-3.13 0-5.82-2.33-6.77-5.52l-3.86 3C3.37 20.33 7.35 23 12 23z" />
                         </svg>
-                        Google Identity Provider Node
+                        Signup Using Google Account
                       </span>
                       <span className="text-slate-600 group-hover:text-slate-400 transition font-mono">→</span>
                     </button>
@@ -760,7 +796,7 @@ export default function Home() {
                         <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 23 23">
                           <path fill="#f35325" d="M0 0h11v11H0z" /><path fill="#80bb00" d="M12 0h11v11H12z" /><path fill="#00a1f1" d="M0 12h11v11H0z" /><path fill="#ffb900" d="M12 12h11v11H12z" />
                         </svg>
-                        Microsoft Entra ID Token Node
+                        Signup using Microsoft Account
                       </span>
                       <span className="text-slate-600 group-hover:text-slate-400 transition font-mono">→</span>
                     </button>
@@ -770,7 +806,7 @@ export default function Home() {
                         <svg className="h-3.5 w-3.5 shrink-0 text-[#0A66C2]" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M22.23 0H1.77C.8 0 0 .77 0 1.72v20.56C0 23.23.8 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.72V1.72C24 .77 23.2 0 22.23 0zM7.12 20.45H3.56V9H7.12v11.45zM5.34 7.43c-1.14 0-2.06-.92-2.06-2.06 0-1.14.92-2.06 2.06-2.06 1.14 0 2.06.92 2.06 2.06 0 1.14-.92 2.06-2.06 2.06zm15.11 13.02h-3.56v-5.6c0-1.34-.03-3.05-1.86-3.05-1.86 0-2.14 1.45-2.14 2.95v5.7H9.33V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29z"/>
                         </svg>
-                        LinkedIn OpenID Network Sync
+                        Signup using LinkedIn Account
                       </span>
                       <span className="text-slate-600 group-hover:text-slate-400 transition font-mono">→</span>
                     </button>
@@ -784,11 +820,10 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                // Static Tech Feature Block Panel When Auth is Idle
                 <div className="w-full max-w-md grid gap-3.5 z-10">
                   <div className="rounded-2xl border border-slate-800/80 bg-slate-950/80 p-5 shadow-xl">
                     <div className="h-2 w-10 rounded bg-blue-500 mb-3" />
-                    <p className="text-xs font-bold text-white tracking-wide uppercase font-mono">Knowledge Cluster Nodes</p>
+                    <p className="text-xs font-bold text-white tracking-wide uppercase font-mono">Knowledge Workspace Nodes</p>
                     <p className="mt-2 text-xs leading-relaxed text-slate-500">Inject governed internal assets, search across verified citation fragments, and control deployment matrix endpoints.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3.5">
@@ -807,7 +842,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Informative Platform Section Bar */}
         <section id="platform" className="border-t border-slate-900 bg-[#04060b] px-6 py-16 z-30 relative shrink-0">
           <div className="mx-auto grid max-w-7xl gap-5 md:grid-cols-3">
             {[
@@ -826,9 +860,11 @@ export default function Home() {
     );
   }
 
-  // 🛡️ CASE 2: USER IS SECURELY LOGGED IN -> RENDER COMPLETE CHAT WORKSPACE CONSOLE
+  // 🛡️ CASE 2: USER IS SECURELY LOGGED IN
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex font-sans select-none relative overflow-hidden">
+      
+      {/* 📁 GATES MODULE 1: EXCLUSIVE ADMIN FILE UPLOADER (STANDALONE) */}
       {showAdminUploadGate && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/75 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl">
@@ -859,63 +895,15 @@ export default function Home() {
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">Use chat, history, citations, export, and sharing without changing uploaded documents.</p>
                 </div>
               </div>
-
-              {userIsAdmin && (
-                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-blue-400">Admin management</p>
-                      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Add or remove upload admins without code changes.</p>
-                    </div>
-                    <span className="rounded-full border border-blue-900/60 bg-blue-950/20 px-2 py-1 text-[10px] font-bold text-blue-300">Super admin</span>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <input
-                      type="email"
-                      value={newAdminEmail}
-                      onChange={(e) => setNewAdminEmail(e.target.value)}
-                      placeholder="employee@company.com"
-                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-blue-600"
-                    />
-                    <div className="flex">
-                      <button onClick={handleSaveAdmin} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-500">
-                        Save
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                    {adminAccess.admins.map((admin) => (
-                      <div key={admin.email} className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-mono text-[11px] text-slate-200">{admin.email}</p>
-                          <p className="text-[10px] font-semibold text-slate-500">Admin</p>
-                        </div>
-                        <button
-                          onClick={() => handleRemoveAdmin(admin.email)}
-                          disabled={admin.email === signedInEmail}
-                          className={`rounded-md border px-2 py-1 text-[10px] font-bold transition ${
-                            admin.email === signedInEmail
-                              ? "cursor-not-allowed border-slate-800 text-slate-600"
-                              : "border-red-900/70 text-red-300 hover:bg-red-950/40"
-                          }`}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {adminManageStatus && <p className="text-[11px] font-mono text-slate-400">{adminManageStatus}</p>}
-                </div>
-              )}
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-800 pt-4">
               <button onClick={() => setShowAdminUploadGate(false)} className="rounded-lg border border-slate-800 px-3 py-2 text-xs font-semibold text-slate-400 hover:text-white">Cancel</button>
               <button
-                onClick={handleAdminUploadConfirm}
+                onClick={() => {
+                  setShowAdminUploadGate(false);
+                  setTimeout(() => fileInputRef.current?.click(), 100);
+                }}
                 disabled={!userIsAdmin || uploading}
                 className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
                   userIsAdmin && !uploading
@@ -930,10 +918,81 @@ export default function Home() {
         </div>
       )}
 
+      {/* ⚡ GATES MODULE 2: SEPARATED FLOATING ADMIN ADD/REMOVE OVERLAY */}
+      {showAdminManagementGate && userIsAdmin && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/75 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-blue-400">Identity Cluster Gates</p>
+                <h2 className="mt-1 text-lg font-bold text-white">Admin Access Management</h2>
+              </div>
+              <button onClick={() => setShowAdminManagementGate(false)} className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-xs font-bold text-slate-400 hover:text-white">X</button>
+            </div>
+
+            <div className="space-y-4 py-4 text-sm text-slate-300">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-blue-400">Privilege Node Distribution</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Authorize or remove console operator identities safely on the loop.</p>
+                  </div>
+                  <span className="rounded-full border border-blue-900/60 bg-blue-950/20 px-2 py-1 text-[10px] font-bold text-blue-300">Super admin</span>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <input
+                    type="email"
+                    value={newAdminEmail}
+                    onChange={(e) => setNewAdminEmail(e.target.value)}
+                    placeholder="operator@company.com"
+                    className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-blue-600"
+                  />
+                  <div className="flex">
+                    <button onClick={handleSaveAdmin} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500">
+                      Add Admin Node
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                  {adminAccess.admins.map((admin) => (
+                    <div key={admin.email} className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-[11px] text-slate-200">{admin.email}</p>
+                        <p className="text-[10px] font-semibold text-slate-500">Admin Clearance Node</p>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveAdmin(admin.email)}
+                        disabled={admin.email === signedInEmail}
+                        className={`rounded-md border px-2 py-1 text-[10px] font-bold transition ${
+                          admin.email === signedInEmail
+                            ? "cursor-not-allowed border-slate-800 text-slate-600"
+                            : "border-red-900/70 text-red-300 hover:bg-red-950/40"
+                        }`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {adminManageStatus && <p className="text-[11px] font-mono text-slate-400 animate-pulse">{adminManageStatus}</p>}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end border-t border-slate-800 pt-4">
+              <button onClick={() => setShowAdminManagementGate(false)} className="rounded-lg border border-slate-800 px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white">Close Panel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SIDEBAR CONTAINER */}
       <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col p-4 space-y-4 shrink-0 relative">
         <button onClick={handleNewChat} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition text-sm shadow">+ New Chat</button>
         
+        {/* 📁 FILE UPLOADER DRAWER PANEL (AS IT WAS) */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -952,7 +1011,7 @@ export default function Home() {
         >
           {userIsAdmin ? (
             <>
-              <span className="text-xl block">Upload Files📁</span>
+              <span className="textxl block">Upload Files 📁</span>
               <p className="text-[11px] text-slate-300 font-semibold">Admin document upload</p>
               <p className="text-[10px] text-slate-500">Click or drop files to update knowledge</p>
             </>
@@ -974,7 +1033,8 @@ export default function Home() {
         
         {uploadStatus && <div className="text-[10px] bg-slate-950 text-center py-1.5 px-2 rounded font-mono text-emerald-400 border border-slate-800 animate-pulse">{uploadStatus}</div>}
 
-        <div className="flex-1 overflow-y-auto space-y-1 pr-1 pt-2 mb-16 select-none">
+        {/* HISTORICAL ROOM LIST CHANNELS */}
+        <div className="flex-1 overflow-y-auto space-y-1 pr-1 pt-2 mb-24 select-none">
           <p className="text-[11px] text-slate-500 uppercase font-bold tracking-wider px-2 mb-2">History Records</p>
           {sortedSessions.map(s => (
             <div key={s.id} className={`group flex items-center justify-between w-full rounded-lg text-xs transition px-3 py-2 relative ${s.id === activeSessionId ? "bg-slate-800 text-slate-100 font-medium" : "text-slate-400 hover:bg-slate-800/60"}`}>
@@ -1004,6 +1064,19 @@ export default function Home() {
           ))}
         </div>
 
+        {/* ⚡ EXCLUSIVE ADMIN PRIVILEGES SECTION: PLACED SPECIFICALLY ABOVE PROFILE COMPONENT */}
+        {userIsAuthenticated && userIsAdmin && (
+          <div className="absolute bottom-[64px] left-0 right-0 p-2 border-t border-slate-800/40 bg-slate-900/90 backdrop-blur-sm z-50">
+            <button 
+              onClick={() => setShowAdminManagementGate(!showAdminManagementGate)}
+              className="w-full bg-slate-950 hover:bg-slate-800 border border-blue-900/40 hover:border-blue-500/60 text-blue-400 text-[11px] font-bold font-mono py-1.5 px-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-inner"
+            >
+              🛠️ Manage Admin Nodes
+            </button>
+          </div>
+        )}
+
+        {/* FIXED FOOTER USER REGISTRY PROFILE PANEL */}
         {session?.user && (
           <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900 z-50 h-[64px]">
             <div className="flex items-center gap-2.5 overflow-hidden">
@@ -1013,7 +1086,7 @@ export default function Home() {
                 <span className="text-[10px] text-slate-500 truncate font-mono">{session.user.email}</span>
               </div>
             </div>
-            <button onClick={() => signOut()} className="text-[10px] text-slate-400 hover:text-red-400 font-bold px-2 py-1 rounded bg-slate-950 border border-slate-800 transition font-mono shrink-0">OUT</button>
+            <button onClick={() => signOut({ callbackUrl: "http://localhost:3000" })} className="text-[10px] text-slate-400 hover:text-red-400 font-bold px-2 py-1 rounded bg-slate-950 border border-slate-800 transition font-mono shrink-0">OUT</button>
           </div>
         )}
       </div>
@@ -1021,7 +1094,7 @@ export default function Home() {
       {/* CORE WORKSPACE PANEL */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-950 relative">
         <header className="border-b border-slate-800 p-4 flex justify-between items-center bg-slate-950/80 backdrop-blur-md shrink-0 z-30">
-          <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">🤖 FloCard AI Intelligence Core</h1>
+          <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">🤖 AI Intelligence Company Bot</h1>
           
           <button 
             ref={dashboardButtonRef}
@@ -1035,7 +1108,7 @@ export default function Home() {
         <div className="flex-1 flex overflow-hidden relative">
           <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-slate-950 to-transparent pointer-events-none z-20" />
 
-          {/* ACTIVE CHAT MAIN CONTAINER CONTAINER */}
+          {/* ACTIVE CHAT MAIN CONTAINER */}
           <div className="flex-1 overflow-y-auto px-6 py-10 space-y-6 scroll-smooth">
             {currentSession.messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm space-y-2">
@@ -1153,7 +1226,7 @@ export default function Home() {
 
           <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent pointer-events-none z-20" />
 
-          {/* CURVED DIAGNOSTIC TELEMETRY SIDEBAR DISPLAY WITH SLIDING AUTO-CLOSE */}
+          {/* CURVED DIAGNOSTIC TELEMETRY SIDEBAR DISPLAY */}
           {showDashboard && (
             <div 
               ref={dashboardRef}
@@ -1210,9 +1283,7 @@ export default function Home() {
                 {adminAccess.feedbackStats.recent.length > 0 ? (
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {adminAccess.feedbackStats.recent.map((fb, index) => (
-                      <div key={index} className="text-xs border-l-2 pl-2 space-y-1
-                        border-emerald-500
-                      ">
+                      <div key={index} className="text-xs border-l-2 pl-2 space-y-1 border-emerald-500">
                         <div className="flex justify-between items-center">
                           <span className={`font-bold text-xs ${fb.feedback === 'good' ? 'text-emerald-400' : 'text-red-400'}`}>
                             {fb.feedback === 'good' ? '👍 Good' : '👎 Bad'}
